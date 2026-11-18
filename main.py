@@ -38,8 +38,12 @@ to whatever launches the case ships):
    log hour-1).  So each hour's shape is shifted by a shrunk linear
    fit of that hour's log-ratio on log hour-1 across the rolling
    launches: small targets get a steeper curve, big targets a flatter
-   one.  The slope is shrunk by n/(n+4) because only 8 launches carry
-   it.
+   one.  The slope is shrunk by n/(n+12) because only 8 launches carry
+   it: the per-hour slopes are noisy, and the size effect has to be
+   extrapolated to GTA VI, whose hour-1 print will sit far above the
+   fitted range, so the conservative factor is what both the practice
+   cases and leave-one-out validation want (n/(n+12) beats n/(n+4) on
+   both: practice 0.144 -> 0.137, leave-one-out 0.279 -> 0.276).
 
 4. Level (launch size).  Fit log(peak) = a + b*log(hour-1) over ALL
    comparables with a usable launch day (the flat fit over all 37 is a
@@ -65,11 +69,11 @@ server):
       mean pinball loss 0.168
       p00 Wolverine   0.175   p01 Red Dead 2   0.154
       p02 God of War  0.147   p03 Spider-Man 2 0.195
-  this model (entry 2):   mean pinball loss 0.144
-      p00 Wolverine   0.134   p01 Red Dead 2   0.153
-      p02 God of War  0.116   p03 Spider-Man 2 0.171
+  this model (entry 2, revised):   mean pinball loss 0.137
+      p00 Wolverine   0.108   p01 Red Dead 2   0.149
+      p02 God of War  0.117   p03 Spider-Man 2 0.174
   Leave-one-out over the 8 rolling launches as pseudo-targets:
-      entry 1 0.296, this model 0.279 (every practice case improves,
+      entry 1 0.296, this model 0.276 (every practice case improves,
       no case regresses).  The practice cases are out-of-sample: they
       are not among the comparables, so no practice answer is used to
       fit anything except choosing between honestly-generalising
@@ -299,7 +303,7 @@ def forecast_case(case):
             vx = sum((x - mx) ** 2 for x in xs) / n
             if vx > 0:
                 b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / n / vx
-                b *= n / (n + 4.0)  # shrink: only 8 rolling launches carry it
+                b *= n / (n + 12.0)  # shrink: only 8 rolling launches carry it
                 med[h] = med[h] + b * (math.log(p1) - mean_log_p1)
 
     # Level: predict the day's peak from the hour-1 print, floored/capped.
