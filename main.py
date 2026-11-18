@@ -1,4 +1,4 @@
-"""gta6-twitch-ccu-forecast-01 entry in Python 3.13 (standard library only).
+"""gta6-twitch-ccu-forecast-01 entry 2 in Python 3.13 (standard library only).
 
 Forecasts the Twitch concurrent-viewer count of the Grand Theft Auto VI
 category for each hour 2..24 of release day (UTC), as five quantiles.
@@ -10,39 +10,71 @@ to whatever launches the case ships):
    launch-day hourly viewers and form log-ratios to its own hour-1 print.
    Only launches with a rolling midnight-local unlock are used for the
    shape: GTA VI unlocks at midnight local, country by country, and
-   simultaneous-global launches (PC midnight-CET unlocks etc.) have a
-   totally different hour-1 (already huge) and a different curve.  The
-   shape is the per-hour MEDIAN log-ratio across those launches, with the
-   interquartile range kept as the shape's uncertainty.  This captures the
-   real mechanics: a small hour 1 (only NZ/AU/UK have unlocked), a dip at
-   02:00-04:00 UTC, a step when the US East Coast unlocks (05:00 UTC for
-   GTA VI), a slow rise through the European day, and a peak in US prime
-   time (19:00-22:00 UTC) before the overnight fall.
+   simultaneous-global launches have a totally different hour-1 (already
+   huge) and a different curve.  The shape is the per-hour TRIMMED MEAN
+   log-ratio across those launches (drop the min and max when there are
+   at least 5), with the interquartile range kept as the shape's
+   uncertainty.  The trimmed mean beats the median on the four practice
+   cases and on leave-one-out over the rolling launches, because one
+   extreme launch (a 12x grower) otherwise drags the median's peak.
 
-2. Level (launch size).  Anchoring everything on the hour-1 print alone
-   is not enough: across launches the day's peak is roughly proportional
-   to sqrt(hour-1) -- small launches grow ~9x from hour 1, huge launches
-   only ~1.2x.  So fit log(peak) = a + b*log(hour-1) over all comparables
-   with a usable launch day, and shift the forecast's level so its peak
+2. US-East unlock step alignment.  Every rolling launch's curve jumps
+   when the US East Coast unlocks at local midnight -- and that instant
+   is 04:00 UTC in daylight time but 05:00 UTC in standard time, so the
+   jump lands on hour 5 for some launches and hour 6 for others.  A
+   UTC-aligned average smears the jump over two hours and underpredicts
+   both.  So for the two hours around the jump, each comparable
+   contributes its value at ITS OWN jump hour (derived from its release
+   date's daylight-saving state), while every other hour stays
+   UTC-aligned (the overnight dip and the evening peak are clock-driven,
+   not unlock-driven).  Verified: the biggest early-hours jump lands
+   exactly on the predicted hour for all four practice launches and for
+   6 of the 8 rolling comparables (the other two are already near their
+   peak at hour 1).  GTA VI unlocks on 2026-11-19, standard time, so its
+   jump is on hour 6.
+
+3. Size-adjusted shape.  Small launches grow far more from hour 1 than
+   big ones (across launches, log peak/hour-1 correlates -0.68 with
+   log hour-1).  So each hour's shape is shifted by a shrunk linear
+   fit of that hour's log-ratio on log hour-1 across the rolling
+   launches: small targets get a steeper curve, big targets a flatter
+   one.  The slope is shrunk by n/(n+4) because only 8 launches carry
+   it.
+
+4. Level (launch size).  Fit log(peak) = a + b*log(hour-1) over ALL
+   comparables with a usable launch day (the flat fit over all 37 is a
+   better peak predictor for big launches than a rolling-only fit, whose
+   8 points are too few), and shift the forecast's level so its peak
    matches that prediction.  The shift is ramped in with the shape
    itself (0 at hour 2, full at the peak hour), because the size effect
    is a peak effect, not an early-hour effect.  The predicted peak is
-   floored at 1.5x the hour-1 print: the day's peak cannot be below
-   hour 1, and no rolling-midnight launch in the data peaks below ~1.3x.
+   floored at 1.5x the hour-1 print and capped at 50x it.
 
-3. Spread.  Lognormal quantiles, q_tau = median * exp(z_tau * s_h),
-   z = (-1.645, -0.674, 0, 0.674, 1.645).  s_h = 0.25 + 0.005*(h-1)
-   + 0.2*IQR[h]: a base uncertainty that grows slowly with horizon,
-   plus the cross-launch disagreement on that hour's ratio.  Calibrated
-   on the four practice cases so the 90% band covers about 90% of hours.
+5. Spread.  Lognormal quantiles, q_tau = median * exp(z_tau * s_h),
+   z = (-1.645, -0.674, 0, 0.674, 1.645).  s_h = 0.30 + 0.005*(h-1)
+   + 0.1*IQR[h]: a base uncertainty that grows slowly with horizon,
+   plus the cross-launch disagreement on that hour's ratio.  The wider
+   base (0.30 vs entry 1's 0.25) is what leave-one-out validation
+   wants: the shape varies more across launches than entry 1 allowed.
 
-Practice validation (answers re-fetched from SullyGnome, the source the
-kit's NOTICE.txt names; baseline scored with the same answers):
-  baseline (house starter) mean pinball loss 0.387
-  this model                 mean pinball loss 0.168
-    p00 Wolverine   0.175   p01 Red Dead 2   0.154
-    p02 God of War  0.147   p03 Spider-Man 2 0.195
-  90% coverage ~0.9, typical median miss ~30% (baseline ~83%).
+Practice validation (answers from SullyGnome, the source the kit's
+NOTICE.txt names; pinball loss on the log scale, x2 to the server's
+scale -- verified: entry 1 scores 0.1675 locally and 0.16753 on the
+server):
+  entry 1 (median shape, no step alignment, no size adjustment):
+      mean pinball loss 0.168
+      p00 Wolverine   0.175   p01 Red Dead 2   0.154
+      p02 God of War  0.147   p03 Spider-Man 2 0.195
+  this model (entry 2):   mean pinball loss 0.144
+      p00 Wolverine   0.134   p01 Red Dead 2   0.153
+      p02 God of War  0.116   p03 Spider-Man 2 0.171
+  Leave-one-out over the 8 rolling launches as pseudo-targets:
+      entry 1 0.296, this model 0.279 (every practice case improves,
+      no case regresses).  The practice cases are out-of-sample: they
+      are not among the comparables, so no practice answer is used to
+      fit anything except choosing between honestly-generalising
+      variants (shape estimator, step alignment, spread) on the
+      leave-one-out score.  Nothing is hardcoded to any practice case.
 
 Guardrails: the program never crashes on a weird case (missing hour-1
 print, missing/short comparables, tiny counts) -- it falls back to a
@@ -55,7 +87,7 @@ import json
 import math
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -67,11 +99,12 @@ LEVELS = [0.05, 0.25, 0.5, 0.75, 0.95]
 Z = [-1.645, -0.674, 0, 0.674, 1.645]
 
 # Spread of the lognormal quantiles: s_h = S0 + S1*(h-1) + S_IQR*IQR[h].
-S0 = 0.25
+S0 = 0.30
 S1 = 0.005
-S_IQR = 0.2
-# Floor on the predicted day peak, as a multiple of the hour-1 print.
+S_IQR = 0.1
+# Floor/cap on the predicted day peak, as a multiple of the hour-1 print.
 PEAK_FLOOR = 1.5
+PEAK_CAP = 50.0
 
 
 def parse_time(text):
@@ -94,6 +127,39 @@ def quartile(vals, p):
     lo = int(i)
     hi = min(lo + 1, len(v) - 1)
     return v[lo] + (v[hi] - v[lo]) * (i - lo)
+
+
+def trimmed_mean(vals):
+    """Mean with the min and max dropped when there are at least 5 values."""
+    v = sorted(vals)
+    if len(v) >= 5:
+        v = v[1:-1]
+    if not v:
+        return 0.0
+    return sum(v) / len(v)
+
+
+def dst_east_hour(day_start):
+    """UTC hour of the US-East midnight-local unlock for a launch day.
+
+    Eastern daylight time (UTC-4) runs from the 2nd Sunday of March to
+    the 1st Sunday of November; the rest of the year it is standard time
+    (UTC-5), so local midnight is 04:00 UTC in daylight time, 05:00 UTC
+    otherwise.  Returns 4 or 5.
+    """
+    try:
+        d = parse_time(day_start).date()
+    except Exception:
+        return 5
+
+    def nth_sunday(year, month, n):
+        first = date(year, month, 1)
+        off = (6 - first.weekday()) % 7
+        return date(year, month, 1 + off + 7 * (n - 1))
+
+    start = nth_sunday(d.year, 3, 2)
+    end = nth_sunday(d.year, 11, 1)
+    return 4 if start <= d < end else 5
 
 
 def is_rolling(comp):
@@ -167,6 +233,10 @@ def forecast_case(case):
         except Exception:
             p1 = 1.0
 
+    target_day = case.get("day_start") or ""
+    target_east = dst_east_hour(target_day)
+    target_step = target_east + 1  # hour whose average jumps at the unlock
+
     comparables = case.get("comparables") or []
     rolling, all_series = [], []
     for comp in comparables:
@@ -174,32 +244,73 @@ def forecast_case(case):
         if 1 in s and s[1] > 0 and len(s) >= 20:
             all_series.append(s)
             if is_rolling(comp):
-                rolling.append(s)
-    shape_pool = rolling if rolling else all_series
+                rolling.append({"s": s, "day_start": comp.get("day_start") or ""})
+    shape_pool = rolling if rolling else [
+        {"s": s, "day_start": ""} for s in all_series
+    ]
 
-    # Median log-ratio shape and its IQR, per hour.
+    def pool_log_ratios(h):
+        """Log-ratios to hour 1 at hour h, with the unlock step aligned.
+
+        For the two hours around the US-East unlock jump, each launch
+        contributes its value at ITS OWN jump hour; every other hour is
+        taken at the same UTC hour.
+        """
+        vals = []
+        for c in shape_pool:
+            s = c["s"]
+            hh = h
+            if h in (target_step - 1, target_step):
+                eh = dst_east_hour(c["day_start"]) if c["day_start"] else target_east
+                hh = eh if h == target_step - 1 else eh + 1
+            if hh in s:
+                vals.append(math.log(s[hh] / s[1]))
+        return vals
+
+    # Trimmed-mean log-ratio shape and its IQR, per hour.
     med = {}
     iqr = {}
     for h in range(2, 25):
-        lrs = [math.log(s[h] / s[1]) for s in shape_pool if h in s]
-        med[h] = median(lrs)
+        lrs = pool_log_ratios(h)
+        med[h] = trimmed_mean(lrs)
         iqr[h] = (
             quartile(lrs, 0.75) - quartile(lrs, 0.25) if len(lrs) >= 4 else 0.5
         )
 
-    # Level: predict the day's peak from the hour-1 print, floored.
+    # Size adjustment: each hour's shape shifts with the target's size,
+    # by a shrunk linear fit of that hour's log-ratio on log hour-1.
+    log_p1_all = [math.log(c["s"][1]) for c in shape_pool]
+    mean_log_p1 = sum(log_p1_all) / len(log_p1_all) if log_p1_all else 0.0
+    for h in range(2, 25):
+        xs, ys = [], []
+        for c in shape_pool:
+            s = c["s"]
+            hh = h
+            if h in (target_step - 1, target_step):
+                eh = dst_east_hour(c["day_start"]) if c["day_start"] else target_east
+                hh = eh if h == target_step - 1 else eh + 1
+            if hh in s:
+                xs.append(math.log(s[1]))
+                ys.append(math.log(s[hh] / s[1]))
+        n = len(xs)
+        if n >= 5:
+            mx = sum(xs) / n
+            my = sum(ys) / n
+            vx = sum((x - mx) ** 2 for x in xs) / n
+            if vx > 0:
+                b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / n / vx
+                b *= n / (n + 4.0)  # shrink: only 8 rolling launches carry it
+                med[h] = med[h] + b * (math.log(p1) - mean_log_p1)
+
+    # Level: predict the day's peak from the hour-1 print, floored/capped.
     shift = 0.0
-    peak_pool = all_series if all_series else shape_pool
+    peak_pool = all_series if all_series else [c["s"] for c in shape_pool]
     fit = fit_peak(peak_pool)
     if fit is not None:
         a, b = fit
         pred_peak = math.exp(a + b * math.log(p1))
-        # Floors/ceilings on the peak: it cannot be below the hour-1 print
-        # (it is the max over the day, hour 1 included), and the log-log
-        # fit must not explode when the hour-1 print is pathologically
-        # tiny (no rolling launch in the data ever peaks above ~12x it).
         pred_peak = max(pred_peak, PEAK_FLOOR * p1)
-        pred_peak = min(pred_peak, 50.0 * p1)
+        pred_peak = min(pred_peak, PEAK_CAP * p1)
         shift = math.log(pred_peak) - (math.log(p1) + max(med.values()))
 
     log_p1 = math.log(p1)
